@@ -13,13 +13,23 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { commonArgs, startPhase } = require('./record.js');
 
-const USAGE = 'usage: --phase=before|after [--cwd=<working directory>] [--scenario=./scenario.js] [--out=.]';
+const USAGE = 'usage: --phase=before|after [--cwd=<working directory>] [--timeout=<seconds>] [--scenario=./scenario.js] [--out=.]';
 const { phase: PHASE, scenarioPath: SCENARIO, out: OUT, arg } = commonArgs(USAGE);
 const CWD = path.resolve(arg('cwd', process.cwd()));
 const TIMEOUT = Number(arg('timeout', 120)) * 1000;   // two minutes: a cache:clear on a cold environment is slow
 const KEEP = 4000;   // characters of each stream kept in phase.json; transcript.txt keeps all of it
 
 if (!fs.existsSync(CWD)) { console.error(`--cwd ${CWD} does not exist`); process.exit(2); }
+// A --timeout that is not a number reaches execFile as NaN, and execFile throws before running
+// anything. sh() runs inside step(), so that throw is caught and filed as a harness error: the phase
+// dies on its first command saying "timeout is out of range" instead of naming what was mistyped.
+// Same treatment --phase already gets in commonArgs: refuse it at startup, while the message can
+// still be about the argument. `Number` and not `parseInt` on purpose: parseInt('120abc') is 120,
+// and a silently truncated timeout is worse than a rejected one.
+if (!Number.isFinite(TIMEOUT) || TIMEOUT <= 0) {
+  console.error(`--timeout must be a positive number of seconds, got "${arg('timeout')}"\n${USAGE}`);
+  process.exit(2);
+}
 
 const transcript = path.join(OUT, 'transcript.txt');
 const log = (s) => fs.appendFileSync(transcript, s);

@@ -66,10 +66,13 @@ function startPhase({ phase, out, scenarioPath, probe }) {
   const put = (bucket, name, passed, detail, extra) => {
     // Only assert.bug re-samples, so only it accepts a function. Anywhere else a function is truthy
     // and would silently record a satisfied precondition for a condition nobody ever evaluated.
-    // Refuse it: this throws inside the step, which lands in harness and voids the phase.
-    if (typeof passed === 'function') {
-      throw new Error(`"${name}" was given a function as its condition. Only assert.bug re-samples `
-        + 'and accepts one. Call it yourself and pass the result: await cond()');
+    // A Promise is the same failure by a shorter route, and the one this very message invites: an
+    // `assert.ok('x', page.locator(s).count())` missing its `await` is truthy whatever it resolves to.
+    // Refuse both: this throws inside the step, which lands in harness and voids the phase.
+    if (typeof passed === 'function' || (passed && typeof passed.then === 'function')) {
+      throw new Error(`"${name}" was given a ${typeof passed === 'function' ? 'function' : 'Promise'} `
+        + `as its condition. Only assert.bug re-samples and accepts one. Evaluate it yourself and pass `
+        + 'the result: await cond()');
     }
     bucket.push({ step: state.stepNo, name, passed: !!passed, detail: detail === undefined ? null : String(detail), ...extra });
     return !!passed;

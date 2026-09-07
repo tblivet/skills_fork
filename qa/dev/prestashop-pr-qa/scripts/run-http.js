@@ -17,6 +17,7 @@ const { phase: PHASE, scenarioPath: SCENARIO, out: OUT, arg } = commonArgs(USAGE
 const BASE = (arg('url', '') || '').replace(/\/$/, '');
 if (!BASE) { console.error(USAGE); process.exit(2); }
 const KEEP = 4000;   // characters of each body kept in phase.json; transcript.txt keeps all of it
+const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token)$/i;
 const REQ_TIMEOUT = 30000;   // named once, so the option and the message it produces cannot drift
 
 const transcript = path.join(OUT, 'transcript.txt');
@@ -60,8 +61,13 @@ let R = null;   // hoisted so the crash handler below can still write phase.json
     const body = opts.body === undefined ? null
       : (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body));
     if (body && !headers['content-type']) headers['content-type'] = 'application/json';
+    // phase.json and transcript.txt both end up attached to a public pull request, so every header
+    // that can carry a credential is masked by pattern rather than by name: a one-name list goes
+    // stale the first time a scenario passes a session cookie or an API key of its own.
     const safeHeaders = { ...headers };
-    if (safeHeaders.authorization) safeHeaders.authorization = '[redacted]';
+    for (const k of Object.keys(safeHeaders)) {
+      if (SECRET_HEADER.test(k)) safeHeaders[k] = '[redacted]';
+    }
     const t0 = Date.now();
     log(`\n${method} ${url.pathname}${url.search}\n`);
     const r = mod.request(url, { method, headers, timeout: REQ_TIMEOUT }, (res) => {

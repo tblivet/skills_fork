@@ -120,6 +120,10 @@ let R = null;   // hoisted so the crash handler below can still write phase.json
   // phases. Letting them reach the preconditions instead would void the verdict over a page the
   // ticket never mentioned.
   let inRegressionNet = false;
+  // Set by loginBO() when its post-condition passed, and read by the surfaces pass. The current
+  // page cannot answer "did this scenario authenticate?": after a front-office step it carries no
+  // password field either, and reading that as a session opens a bo: surface without one.
+  let boSession = false;
   const where = (u) => { try { return new URL(u).pathname; } catch (_) { return u; } };
   page.on('response', (r) => {
     if (inRegressionNet) return;
@@ -205,7 +209,7 @@ let R = null;   // hoisted so the crash handler below can still write phase.json
       await settle();
       if (nav) { resp = nav; await preflight(nav, 'back office login'); }
     }
-    assert.ok('back office is logged in', (await page.locator('input[name="passwd"]').count()) === 0, page.url());
+    boSession = assert.ok('back office is logged in', (await page.locator('input[name="passwd"]').count()) === 0, page.url());
     assert.ok('back office token is valid', !/Invalid security token|Invalid token/i.test(await page.content()));
   };
 
@@ -294,7 +298,7 @@ let R = null;   // hoisted so the crash handler below can still write phase.json
     // not authenticate would be worse than not checking it. So no login happens here. If the
     // scenario declared a back-office surface it has to call loginBO() itself, and if it did not,
     // the surface is recorded as unmeasured with that reason written out.
-    const loggedIn = BO ? (await page.locator('input[name="passwd"]').count()) === 0 : false;
+    const loggedIn = BO && boSession;
     for (const entry of list) {
       const m = /^(bo|fo):(.*)$/.exec(entry);
       const side = m ? m[1] : 'fo';
@@ -316,12 +320,17 @@ let R = null;   // hoisted so the crash handler below can still write phase.json
       // calling it red would fail a pull request over a URL this runner cannot legitimately build.
       const tokenWall = /Invalid security token|Invalid token/i.test(body);
       const rendered = await isRendered();
+      // Belt and braces over the flag above: a session that expired between the login step and this
+      // pass sends the surface back to the login form, which answers 200 and renders text. Recording
+      // that as a working page is the "passed for the wrong reason" failure this skill exists to catch.
+      const onLogin = side === 'bo' && (await page.locator('input[name="passwd"]').count()) > 0;
       const shot = shotName('surface', `${side}-${ref}`);
       await page.screenshot({ path: path.join(OUT, shot), fullPage: false }).catch(() => {});
       rec.surfaces.push({
         side, ref, url: target, status, shot, rendered,
-        unreachable: tokenWall ? 'the legacy back-office URL is token-signed, so it cannot be opened directly' : null,
-        ok: tokenWall ? null : (status > 0 && status < 400 && !FATAL.test(body) && rendered),
+        unreachable: tokenWall ? 'the legacy back-office URL is token-signed, so it cannot be opened directly'
+          : onLogin ? 'the back office answered with the login form, so this page was not measured' : null,
+        ok: (tokenWall || onLogin) ? null : (status > 0 && status < 400 && !FATAL.test(body) && rendered),
       });
     }
   };
@@ -376,7 +385,7 @@ let R = null;   // hoisted so the crash handler below can still write phase.json
           viewport: name, size: `${VIEWS[name].width}x${VIEWS[name].height}`, url: target,
           status, responds: status > 0 && status < 400 && !fatal, rendered,
           overflowPx: m.over, worst: m.worst, shot,
-          ok: status > 0 && status < 400 && !fatal && m.rendered && m.over === 0,
+          ok: status > 0 && status < 400 && !fatal && rendered && m.over === 0,
         });
       }
     }

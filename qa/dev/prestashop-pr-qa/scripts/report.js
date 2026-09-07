@@ -181,9 +181,15 @@ const netRows = () => {
   const map = new Map();
   (before ? before.responsive : []).forEach((r) => map.set(key(r), { b: r }));
   (after ? after.responsive : []).forEach((r) => map.set(key(r), { ...(map.get(key(r)) || {}), a: r }));
+  // The verdict on a narrow page is exactly its three recorded facts, so it is computed here from
+  // them rather than read from the phase file. A row whose `ok` disagreed with its own `responds`,
+  // `rendered` and `overflowPx` used to badge a healthy page "pre-existing" with an empty reason,
+  // because `why()` below rebuilds the reason from those three and found nothing wrong to say.
+  const okOf = (r) => !!r && r.responds && r.rendered && r.overflowPx === 0;
+  const rated = (r) => r ? { ...r, ok: okOf(r) } : r;
   return [...map.entries()].map(([k, { b, a }]) => {
-    const state = attribute(b, a);
-    const why = (r) => !r ? 'not measured' : r.ok ? 'ok'
+    const state = attribute(rated(b), rated(a));
+    const why = (r) => !r ? 'not measured' : okOf(r) ? 'ok'
       : [!r.responds ? 'did not respond' : '', !r.rendered ? 'rendered nothing' : '',
          r.overflowPx ? `scrolls sideways by ${r.overflowPx}\u00a0px` : ''].filter(Boolean).join(', ');
     const worst = (a && a.worst || []).concat(b && b.worst || []);

@@ -53,12 +53,19 @@ skills currently available:
 | `user`   | `prestashop-update`       | **prestashop-store-update**   | Update a PrestaShop store by using the Module Update Assistant. Evaluates compatibility and proceeds with the upgrade.                                                   |
 | `user`   | `prestashop-update-check` | **prestashop-store-check**    | Check if a PrestaShop store is ready to be updated. Assesses compatibility and available versions without starting the actual update.                                    |
 
+### Domain: `qa`
+
+| Category | Skill Folder       | Skill Name           | Description                                                                                                                                                                                        |
+| -------- | ------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`    | `prestashop-pr-qa` | **prestashop-pr-qa** | QA a pull request against a running environment, in a browser, on the command line or over HTTP: reproduce the bug, verify the fix, and report whether it is approved, with the recording as proof. |
+
 ## 🗂️ Repository Structure
 
 The repository is organized by **application domains**. Currently, the supported
 domains include:
 
 - [`autoupgrade`](#domain-autoupgrade) (Module Update Assistant)
+- [`qa`](#domain-qa) (Quality assurance on pull requests)
 
 _(More domains like core, specific modules, and themes will be added over
 time)._
@@ -82,6 +89,12 @@ PrestaShop/skills/
 │   │   ├── prestashop-restore/
 │   │   └── ...
 │   └── dev/              # Developer-facing skills
+├── qa/                   # Domain
+│   └── dev/
+│       └── prestashop-pr-qa/
+│           ├── SKILL.md
+│           ├── references/   # Long knowledge, read on demand
+│           └── scripts/      # Code the skill runs, shipped rather than retyped
 └── README.md             # This file
 ```
 

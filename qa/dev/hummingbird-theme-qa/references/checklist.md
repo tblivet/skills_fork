@@ -10,8 +10,10 @@ the checklist is built not to be.
 
 **Take it from the release tag matching the theme version.** Two people testing the same release
 then read the same checklist, and a campaign resumed months later reads it again unchanged.
-`checklist.js` looks for `v<version>` and then `<version>`, and falls back to the working copy
-only when neither carries the file. The report says which of the two it used, on its front page,
+`checklist.js` asks for `refs/tags/v<version>`, the tag itself rather than any ref with that name,
+so a branch called `v2.1.0` can never be labelled a release. One spelling only: every Hummingbird
+release is tagged `vX.Y.Z`. It falls back to the working copy when that tag does not carry the
+file, and says so. The report says which of the two it used, on its front page,
 because a checklist from a moving branch is a weaker basis than one from a tag.
 
 ## What counts as a test

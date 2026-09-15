@@ -48,13 +48,23 @@ The developer owns `git`. Everything downstream of a checkout, the build, `compo
 `fingerprint.js` runs a read-only command you give it, so nothing about the setup is assumed:
 
 ```bash
-node "$SKILL_DIR/scripts/fingerprint.js" \
-  --sql='docker exec -i <db container> mariadb -u<user> <database> -N -B' \
-  --out="$RUN/baseline/settings.json"
+export QA_SQL='docker exec -i <db container> mariadb -u<user> -p<password> <database> -N -B'
+node "$SKILL_DIR/scripts/fingerprint.js" --out="$RUN/baseline/settings.json"
 ```
+
+**The command goes in the environment, like the back office credentials.** A command line is
+readable by every other user on the machine, and the skill prints the commands it is about to run,
+so an argument also lands in the transcript and in any log that gets pasted. `--sql=` stays for a
+command that carries no secret.
 
 It finds the table prefix from the database rather than assuming one, reads every setting, and
 hashes them. **The command is never written to any file**, because it carries a password.
+
+Plenty of tables end in `configuration` without being a shop's: `ps_smartblog_configuration` is a
+module's. So each candidate is checked for the rest of a shop behind it, a matching `shop_url`
+table, and only a real second shop makes it refuse. Two shops in one database means the reading
+could be about either, and a fingerprint of the wrong shop still comes out green: point the command
+at one database, or pass `--prefix=ps_`.
 
 `baseline/settings.json` holds the merchant's email address and can hold credentials. It stays in
 the campaign folder. What travels is the fingerprint and the names of settings that moved, never
@@ -63,8 +73,12 @@ their values.
 Before each new section:
 
 ```bash
-node "$SKILL_DIR/scripts/fingerprint.js" --sql='...' --compare="$RUN/baseline/settings.json"
+export QA_SQL='[the same read-only command]'
+node "$SKILL_DIR/scripts/fingerprint.js" --compare="$RUN/baseline/settings.json"
 ```
+
+`QA_SQL` is exported again because every command runs in a fresh shell. Without it the script
+prints its usage and exits, which reads like a check that passed and is a check that never ran.
 
 It exits 0 when the shop is the one measured before, and 1 when it has moved, naming what moved.
 A move nothing in the journal explains means results either side are not about the same shop:

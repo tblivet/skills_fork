@@ -78,10 +78,13 @@ const videoTmp = path.join(outRoot, `.video-${label}-${profile}-${viewportName}`
     name: 'browser',
     runnerFile: __filename,
     settle,
+    // Nothing is caught here on purpose: record.js turns a capture that fails
+    // into a fault on the run, naming why, rather than a run that carries on
+    // with nothing to show.
     capture: async (n, name) => {
       const file = `${n}-${slug(name)}.png`;
       await hudOff();
-      try { await page.screenshot({ path: path.join(out, file) }); } catch { return null; }
+      await page.screenshot({ path: path.join(out, file) });
       return file;
     },
     meta: () => ({
@@ -408,7 +411,15 @@ const videoTmp = path.join(outRoot, `.video-${label}-${profile}-${viewportName}`
   async function snap(name) {
     const file = `x-${slug(name)}.png`;
     await hudOff();
-    try { await page.screenshot({ path: path.join(out, file) }); } catch { return null; }
+    try {
+      await page.screenshot({ path: path.join(out, file) });
+    } catch (err) {
+      // A missing picture is never silent: the checks that call snap() are the
+      // ones handing a judgement to a person, and a person cannot judge a
+      // screenshot that was never taken.
+      S.fault(`the screenshot "${name}" could not be taken: ${String((err && err.message) || err).slice(0, 160)}`);
+      return null;
+    }
     return file;
   }
 
@@ -441,20 +452,24 @@ const videoTmp = path.join(outRoot, `.video-${label}-${profile}-${viewportName}`
     fixtureCreated: S.fixtureCreated, fixtureRemoved: S.fixtureRemoved, fixtureLeft: S.fixtureLeft,
   };
 
+  // A suite that throws is the run that most needs its recording kept, so the
+  // crash is recorded and the closing down carries on rather than exiting here.
+  let crashed = null;
   try {
     await suite.run(api);
   } catch (e) {
-    S.die(e);
+    crashed = String((e && e.stack) || e);
+    S.fault(`the suite stopped: ${crashed.slice(0, 300)}`);
   }
 
-  const result = S.finish();
+  const result = S.finish(crashed ? { outcome: 'the run did not finish' } : {});
 
   // A browser starts recording when it opens, not when a problem appears, so
   // every section is recorded and the ones that found nothing have their
   // recording thrown away.
   const video = page.video();
   await context.close();          // the recording is only finished once the context is
-  const keep = result.wentWrong || S.rec.harness.length > 0;
+  const keep = result.wentWrong || S.rec.harness.length > 0 || !!crashed;
   if (video && keep) {
     // Saving has to happen before the browser goes away, and a failure here is
     // said out loud: a recording that vanished quietly is a missing piece of
@@ -476,6 +491,7 @@ const videoTmp = path.join(outRoot, `.video-${label}-${profile}-${viewportName}`
   try { if (video) await video.delete(); } catch { /* the temp folder goes next anyway */ }
   await browser.close();
   fs.rmSync(videoTmp, { recursive: true, force: true });
+  if (crashed) process.exitCode = 2;
 })().catch((e) => {
   console.error(`the run stopped before it could record anything: ${String((e && e.stack) || e)}`);
   process.exit(2);

@@ -16,8 +16,13 @@ good intentions:
 
 * **Nothing passes by default.** A checklist point is green only if a check looked at it and
   recorded what it looked for.
-* **Every green points at a file.** `report.js` refuses to build a report that claims a check
-  whose evidence is not on disk.
+* **Every green points at a file.** Either the check named one, or it ran inside a step and the
+  screenshot of that step stands for it. `report.js` refuses to build a report with a green that
+  has neither, and a screenshot that could not be taken is a fault on the run rather than a
+  silence. This is why **every check belongs inside a `step()`**: the step is what photographs it.
+* **A campaign can be driven to the end without a person reading the report each time.** Every
+  build writes `gaps.json`, the points still owed an answer, and `--require-complete` refuses to
+  build at all while that list is not empty.
 
 ## Words this skill uses
 
@@ -55,8 +60,9 @@ They know the theme and the shop. They do not know this skill and should not hav
    checkout, the build, `composer install`, `cache:clear`, this skill offers to run.
 4. **Evidence never lands in the theme folder or anywhere the shop serves.** `pick-run-dir.sh`
    enforces it and refuses a folder that would.
-5. **Back-office credentials arrive as `QA_BO_EMAIL` and `QA_BO_PASSWORD` in the environment**,
-   never as arguments: arguments end up in files that get shared.
+5. **Credentials arrive in the environment**, never as arguments: `QA_BO_EMAIL` and
+   `QA_BO_PASSWORD` for the back office, `QA_SQL` for the command that reads the database.
+   Arguments are readable by everyone on the machine and end up in files that get shared.
 6. **Nothing is posted anywhere.** Issue text is written to files for the user to paste.
 7. **A shop-wide setting is written down before it is changed**, and a restore nobody could
    confirm counts as a failure.
@@ -71,7 +77,8 @@ They know the theme and the shop. They do not know this skill and should not hav
   folder name, which differs on every installation
 * the Hummingbird folder to read the checklist from
 * a read-only command that reaches the shop database, for the settings reading. It runs as
-  given, so nothing here assumes Flashlight, the official image, or any container name
+  given, so nothing here assumes Flashlight, the official image, or any container name. Ask for it
+  once and put it in `QA_SQL`, because it carries a password and an argument does not stay private
 * whether the whole checklist is wanted, which is the default, or a narrower set of sections
 
 Do not ask for anywhere to put files: `pick-run-dir.sh` works that out and refuses a bad one.
@@ -82,20 +89,42 @@ Copy this into your reply and tick it off:
 
 ```
 Campaign progress:
-- [ ] 1. Read the shop, the checklist and the settings baseline
-- [ ] 2. Set up the campaign folder and the browser tooling
+- [ ] 1. Set up the campaign folder and the browser tooling
+- [ ] 2. Read the shop, the checklist and the settings baseline
 - [ ] 3. Agree the run
-- [ ] 4. Run it, section by section
+- [ ] 4. Run it, section by section, until gaps.json is empty
 - [ ] 5. Sort the new problems from the old ones
-- [ ] 6. Write campaign.json, build the report, offer the link
+- [ ] 6. Write campaign.json, build the report, write the issue files, offer the link
 ```
 
-### 1. Read the shop, the checklist and the settings baseline
+### 1. Set up the campaign folder
 
-`SKILL_DIR` is the folder this file was read from.
+Nothing is written anywhere until this has answered, because the next step reads the shop settings
+into a file that carries the merchant's email address. `SKILL_DIR` is the folder this file was
+read from.
 
 ```bash
-node "$SKILL_DIR/scripts/checklist.js" --theme="[the Hummingbird folder]" --out=checklist.json
+RUN=$(sh "$SKILL_DIR/scripts/pick-run-dir.sh" "[front office URL]" \
+        "$HOME/hummingbird-theme-qa/[theme version]-ps[PrestaShop version]-[date]" \
+        "[the Hummingbird folder]") || exit 1
+
+NODE_PATH=$(sh "$SKILL_DIR/scripts/playwright-lab.sh") || exit 1; export NODE_PATH
+```
+
+Keep the `|| exit 1`. Without it a refusal leaves `$RUN` empty and the campaign writes into
+`/suites`.
+
+The Hummingbird folder goes in as a third argument on purpose: that is what makes rule 4 true in
+every setup rather than only when the shop happens to run from the theme's own compose file.
+
+If it refuses, read what it printed. It refuses a folder inside the theme checkout, inside
+anything the shop serves, and any path holding a value that was never filled in. Tell the user
+where the campaign folder is now, and again at the end.
+
+### 2. Read the shop, the checklist and the settings baseline
+
+```bash
+node "$SKILL_DIR/scripts/checklist.js" --theme="[the Hummingbird folder]" --out="$RUN/checklist.json"
 ```
 
 It says where it took the checklist from, prints its decision about every table, and counts the
@@ -109,24 +138,21 @@ combination nobody supports.
 Then take the settings baseline, which is what later tells you the shop has not moved:
 
 ```bash
-node "$SKILL_DIR/scripts/fingerprint.js" --sql='[the read-only command]' --out=baseline/settings.json
+export QA_SQL='[the read-only command]'
+node "$SKILL_DIR/scripts/fingerprint.js" --out="$RUN/baseline/settings.json"
 ```
 
-`baseline/settings.json` holds the merchant's email address and can hold credentials. It stays
+**`QA_SQL` has to be exported in every shell that reads the shop**, including the drift check in
+step 4: each command you run starts a fresh one, and an unset `QA_SQL` makes `fingerprint.js`
+print its usage and exit without ever reaching the database, which is a check that looks like it
+passed and never ran.
+
+**The command goes in the environment, never in an argument.** An argument is readable by every
+other user on the machine and is printed into the transcript, and this one carries the database
+password. `--sql=` stays for a command that carries no secret.
+
+`$RUN/baseline/settings.json` holds the merchant's email address and can hold credentials. It stays
 in the campaign folder and never goes into a published report.
-
-### 2. Set up
-
-```bash
-RUN=$(sh "$SKILL_DIR/scripts/pick-run-dir.sh" "[front office URL]" \
-        "$HOME/hummingbird-theme-qa/[theme version]-ps[PrestaShop version]-[date]")
-
-NODE_PATH=$(sh "$SKILL_DIR/scripts/playwright-lab.sh"); export NODE_PATH
-```
-
-If `pick-run-dir.sh` refuses, read what it printed. It refuses a folder inside the theme
-checkout, inside anything the shop serves, and any path holding a value that was never filled
-in. Tell the user where the campaign folder is now, and again at the end.
 
 ### 3. Agree the run
 
@@ -143,7 +169,7 @@ handed, and the list of checks that pass for the wrong reason. Then, for each ce
 node "$SKILL_DIR/scripts/run-suite.js" \
   --suite="$RUN/suites/[section]/suite.js" --out="$RUN/suites/[section]" --label=pass \
   --url="[front office]" --bo-url="[back office]" \
-  --profile=b2c --viewport=desktop --checklist-sha="[from checklist.json]"
+  --profile=b2c --viewport=desktop --checklist-sha="[the sha256 from $RUN/checklist.json]"
 ```
 
 Run **profile by profile, not section by section**: B2B mode is a shop-wide switch, so every B2C
@@ -158,18 +184,40 @@ listing buys nothing and changes the shop for every section after it. Make it th
 office or the front office, never by writing to the database, or the theme will look broken when
 it is not. The rules and the calls are in [references/environment.md](references/environment.md).
 
-A result that came from a command or from a person goes through the same door:
+A result that came from a command or from a person goes through the same door, and carries the
+file that shows it. Put that file in the cell folder first:
 
 ```bash
+mkdir -p "$RUN/suites/1/pass/b2c-desktop"
+npm run lint > "$RUN/suites/1/pass/b2c-desktop/lint.txt" 2>&1
+
 node "$SKILL_DIR/scripts/observe.js" --out="$RUN/suites/1" --item=1.1/02 --outcome=pass \
-  --by=command --assertion='the linters and Prettier both finished clean'
+  --by=command --assertion='the linters and Prettier both finished clean' \
+  --evidence=lint.txt --checklist-sha="[the sha256 from $RUN/checklist.json]"
+```
+
+A browser check leans on the screenshot of its step. Nothing photographed this one, so it names
+its own proof, and `observe.js` refuses a pass without one.
+
+**Answering the whole checklist, without a person driving each turn.** After each section, build
+the report and read `gaps.json`: it lists every point still owed an answer and, for a partly
+covered one, which cells are missing. Write the suites it names, run them, build again, until it
+is empty. Then build with `--require-complete`, which refuses while anything in scope is still
+unanswered, so a campaign cannot quietly finish half done.
+
+```bash
+node "$SKILL_DIR/scripts/report.js" --campaign="$RUN" >/dev/null
+node -e 'const g=require(process.argv[1]);console.log(g.notCovered.length+g.partlyCovered.length+" still owed");
+         for (const x of [...g.notCovered,...g.partlyCovered].slice(0,20)) console.log(" ",x.item,x.text.slice(0,70))' \
+  "$RUN/gaps.json"
 ```
 
 Before starting each new section, read the settings again and compare. If they moved and nothing
 in the journal explains it, stop: results either side are not about the same shop.
 
 ```bash
-node "$SKILL_DIR/scripts/fingerprint.js" --sql='[the command]' --compare="$RUN/baseline/settings.json"
+export QA_SQL='[the same read-only command]'
+node "$SKILL_DIR/scripts/fingerprint.js" --compare="$RUN/baseline/settings.json"
 ```
 
 ### 5. Sort the new problems from the old ones
@@ -182,11 +230,19 @@ Write `campaign.json` yourself: it carries what was tested and what was found, a
 place a judgement is written. Its shape is in [references/reporting.md](references/reporting.md).
 
 ```bash
-node "$SKILL_DIR/scripts/report.js" --campaign="$RUN" --artifact=report-artifact.html
+node "$SKILL_DIR/scripts/report.js" --campaign="$RUN" --artifact=report-artifact.html --require-complete
 ```
 
-It refuses to build if any claim is unbacked. Fix what it names rather than passing
-`--no-verify`, which exists only to look at a report you already know is not trustworthy.
+It refuses to build if any claim is unbacked, if a green has no file behind it, if a run answered
+a different revision of the checklist, or, with `--require-complete`, while anything in scope is
+still unanswered. Fix what it names rather than passing `--no-verify`, which exists only to look
+at a report you already know is not trustworthy. Drop `--require-complete` only for a campaign
+that was deliberately narrowed, and then say so in `scope`.
+
+Then write one issue file per finding, for the repository that owns it, into `$RUN/issues/`, with
+an `index.md` saying what to open where. The rules for what goes in them, and what never does, are
+in [references/reporting.md](references/reporting.md). **Nothing is posted anywhere**: give the
+user the files and the command to copy one.
 
 Then offer to publish `report-artifact.html` as an Artifact so it has a link that can be shared.
 **Look at every screenshot in it first.** A back office puts email addresses in order pages and a
@@ -237,6 +293,12 @@ stale checklist line is not "nearly three": it is a number nobody can use.
 | `refusing: nothing publishes port N` | the shop is not in Docker, so what it serves cannot be found | pass the folder the web server serves as a third argument |
 | `node is not on PATH` | node comes from nvm or asdf, which a non-interactive shell does not load | run from a shell where `node -v` works |
 | `refusing to build the report` | a claim has no evidence behind it | fix what it names; that message is the skill working |
+| `is recorded as passing with nothing to show for it` | a check ran outside any `step()`, so nothing photographed it | move it inside a step, or name a file with `--evidence` |
+| `left no screenshot` in the faults | the browser could not photograph a step | the folder may be read-only or the page never settled. Every green in that run is now unproven, so fix it and run the section again |
+| `this run answered a different revision of the checklist` | the checklist moved under a half-finished campaign | run `checklist.js --diff` to see what moved, then re-run the sections it touched |
+| `two shops share this database` | two prefixes, each with a full shop behind it | point the command at one database, or pass `--prefix=ps_` |
+| `never said which revision of the checklist it answered` | a run was made without `--checklist-sha` | pass it, and re-run that cell |
+| `point(s) in scope are not answered on every cell yet` | `--require-complete` and `gaps.json` is not empty | answer what it names, or drop the flag and declare the narrowed `scope` |
 | `THE SHOP HAS MOVED` | a setting changed since the baseline | put it back, or start a clean shop, and say in the report that a reset happened |
 | a module check says "renders nothing" | it is installed and its assets load but it shows nothing | read its configuration: an empty one is a state the checklist asks about, a dead hook is a defect |
 | every mobile control reads "hidden by a parent" | they live in a drawer that starts closed | open the drawer first, which is the mobile check the checklist actually asks for |
@@ -257,4 +319,4 @@ stale checklist line is not "nearly three": it is a number nobody can use.
 | `scripts/record.js` | the rules every run shares. Never edited for a campaign |
 | `scripts/run-suite.js` | runs one section in a browser |
 | `scripts/observe.js` | records an answer that came from a command or from a person |
-| `scripts/report.js` | builds the report, and refuses to build an unproven claim |
+| `scripts/report.js` | builds the report and `gaps.json`, and refuses to build an unproven claim |

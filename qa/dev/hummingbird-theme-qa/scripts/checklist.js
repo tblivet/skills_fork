@@ -39,10 +39,14 @@ function arg(name, fallback = null) {
   return fallback;
 }
 
+// "git is not installed" and "that ref does not exist" lead to different fixes,
+// so they are not allowed to come back as the same null.
+let gitMissing = false;
 function git(cwd, args) {
   try {
     return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  } catch {
+  } catch (err) {
+    if (err && err.code === 'ENOENT') gitMissing = true;
     return null;
   }
 }
@@ -66,26 +70,45 @@ function readChecklist(theme, wantedRef) {
   }
 
   const tried = [];
+  // `git show v2.1.0:file` resolves a branch called v2.1.0 just as happily as the
+  // tag, and the report turns the label "tag" into "the same for everyone, it
+  // cannot move". Ask for the tag itself, so the label is always true.
+  const looksLikeACommit = (r) => /^[0-9a-f]{7,40}$/i.test(r);
   const fromRef = (ref, kind) => {
-    const text = git(theme, ['show', `${ref}:${FILE}`]);
-    tried.push(`${ref}: ${text ? 'found' : 'not there'}`);
-    return text ? { text, source: { kind, ref, path: FILE } } : null;
+    // A ref given already qualified, or given as a commit, is asked for as it
+    // stands: refs/tags/refs/tags/v2.1.0 resolves to nothing, and the report
+    // would then call a tag something that can move.
+    const rev = kind === 'tag' && !ref.startsWith('refs/') && !looksLikeACommit(ref)
+      ? `refs/tags/${ref}` : ref;
+    const text = git(theme, ['show', `${rev}:${FILE}`]);
+    tried.push(`${rev}: ${text ? 'found' : 'not there'}`);
+    return text ? { text, source: { kind, ref, rev, path: FILE } } : null;
   };
 
   if (wantedRef) {
-    const got = fromRef(wantedRef, 'tag');
-    if (!got) die(`${wantedRef} does not carry ${FILE}. Tried:\n  ${tried.join('\n  ')}`);
-    say(`checklist read from ${wantedRef}, which you named`);
+    // Named as a tag, as refs/tags/something, or as a commit: all three are
+    // fixed, and the report may say so. Anything else can move.
+    const namedSomethingFixed =
+      wantedRef.startsWith('refs/tags/') || looksLikeACommit(wantedRef);
+    const got = fromRef(wantedRef, 'tag')
+      || fromRef(wantedRef, namedSomethingFixed ? 'tag' : 'other');
+    if (!got) {
+      if (gitMissing) die('git is not on PATH, so no tag can be read. Install it, or run from a shell where `git --version` works');
+      die(`${wantedRef} does not carry ${FILE}. Tried:\n  ${tried.join('\n  ')}`);
+    }
+    say(`checklist read from ${got.source.rev}, which you named`);
     return { ...got, themeVersion: version };
   }
 
+  // One spelling, not two. Every Hummingbird release is tagged `vX.Y.Z`, and
+  // theme.yml carries the version without the v, so `refs/tags/2.1.0` is a shape
+  // that has never existed. Hunting for a second spelling would only turn "no
+  // tag carries this checklist" into a quieter, later surprise.
   if (version) {
-    for (const ref of [`v${version}`, version]) {
-      const got = fromRef(ref, 'tag');
-      if (got) {
-        say(`checklist read from the release tag ${ref}, matching theme ${version}`);
-        return { ...got, themeVersion: version };
-      }
+    const got = fromRef(`v${version}`, 'tag');
+    if (got) {
+      say(`checklist read from the release tag v${version}, matching theme ${version}`);
+      return { ...got, themeVersion: version };
     }
   }
 
@@ -95,11 +118,16 @@ function readChecklist(theme, wantedRef) {
   }
   const branch = (git(theme, ['rev-parse', '--abbrev-ref', 'HEAD']) || '').trim() || null;
   const dirty = !!(git(theme, ['status', '--porcelain', '--', FILE]) || '').trim();
-  say(`no release tag carries ${FILE}, so it was read from the working copy${branch ? ` on ${branch}` : ''}.`);
+  if (gitMissing) {
+    say('git is not on PATH, so no release tag could be looked for at all, and this is the file as it sits on disk.');
+    say('That is the weakest basis of the three. Install git if this campaign is meant to be repeatable.');
+  } else {
+    say(`no release tag carries ${FILE}, so it was read from the working copy${branch ? ` on ${branch}` : ''}.`);
+  }
   say('That is a weaker basis than a tag, and the report says so on its front page.');
   return {
     text: fs.readFileSync(file, 'utf8'),
-    source: { kind: 'working-copy', ref: branch, path: FILE, uncommittedChanges: dirty },
+    source: { kind: 'working-copy', ref: branch, path: FILE, uncommittedChanges: dirty, gitAvailable: !gitMissing },
     themeVersion: version,
   };
 }

@@ -4,16 +4,21 @@
 // Reads the shop's settings and hashes them, so a campaign can tell that the
 // shop it is measuring is still the shop it measured last time.
 //
-//   node fingerprint.js --sql='<command that reads SQL on stdin>' --out=settings.json
-//   node fingerprint.js --sql='...' --compare=settings.json
+//   QA_SQL='<command that reads SQL on stdin>' node fingerprint.js --out=settings.json
+//   QA_SQL='...' node fingerprint.js --compare=settings.json
 //
 // The command is yours to give: this skill runs on Flashlight, on the official
 // PrestaShop image, or on anything else, so it never assumes a container name, a
 // user or a database. Whatever you pass is run as is, and is NEVER written to
 // any output file, because it carries a password.
 //
+// **Give it as QA_SQL in the environment**, the way the back office credentials
+// are given. A command line is visible to every other user on the machine, in
+// `ps` and in /proc, and it is printed into the transcript and into any log that
+// gets pasted. `--sql` stays for a command that carries no secret.
+//
+//   QA_SQL='docker exec -i <db container> mariadb -u<user> -p<password> <db> -N -B'
 //   --sql='docker exec -i <db container> mariadb -u<user> <database> -N -B'
-//   --sql='mysql -h 127.0.0.1 -P 8888 -u <user> -p<password> <database> -N -B'
 //
 // Exit 0 read, 1 the shop moved (with --compare), 2 could not read it, 64 wrong arguments.
 
@@ -72,13 +77,45 @@ function discoverPrefix(sqlCommand) {
   const names = out.split('\n').map((l) => l.trim()).filter(Boolean);
   const exact = names.filter((n) => n.endsWith('configuration'));
   if (!exact.length) die('no configuration table found. Is that the shop database?');
-  const prefix = exact[0].slice(0, exact[0].length - 'configuration'.length);
+
+  // Most of what ends in "configuration" is a module's own table, not a second
+  // shop: ps_smartblog_configuration sits in plenty of ordinary single-shop
+  // installs. A prefix that belongs to a shop has the rest of the shop behind
+  // it, so ask the database which candidates also carry ps_shop_url.
+  const candidates = exact.map((t) => t.slice(0, t.length - 'configuration'.length));
+  const shops = [];
+  for (const prefix of candidates) {
+    const probe = query(sqlCommand, `SHOW TABLES LIKE '${prefix}shop_url';\n`).trim();
+    if (probe) shops.push(prefix);
+  }
+
+  if (!shops.length) {
+    die(`found ${exact.join(', ')}, but none of them has a matching shop_url table, so none looks like a `
+      + 'PrestaShop install. Is that the shop database?');
+  }
+  // Two real prefixes is two shops in one database, an ordinary dev box. Picking
+  // one would fingerprint a shop the campaign is not testing, and the drift
+  // check would then be about nothing while still coming out green.
+  if (shops.length > 1) {
+    die(`two shops share this database (${shops.map((p) => `${p}configuration`).join(', ')}). Say which one: `
+      + 'point the command at a single database, or give the prefix with --prefix=ps_');
+  }
+  const prefix = shops[0];
   say(`table prefix read from the database: ${prefix || '(none)'}`);
+  if (candidates.length > 1) {
+    say(`  (${candidates.length - 1} other table(s) end in "configuration" and belong to modules, not to a shop)`);
+  }
   return prefix;
 }
 
 function readSettings(sqlCommand, ignores) {
-  const prefix = discoverPrefix(sqlCommand);
+  const given = arg('prefix');
+  if (given === '') {
+    die('--prefix= was given with nothing after it. Write the prefix, as in --prefix=ps_, or leave the '
+      + 'option out and let the database be asked');
+  }
+  if (given) say(`table prefix given on the command line: ${given}`);
+  const prefix = given !== null ? given : discoverPrefix(sqlCommand);
   const sql = `SELECT name, IFNULL(id_shop_group, 0), IFNULL(id_shop, 0), IFNULL(value, '')
                FROM ${prefix}configuration ORDER BY name, id_shop_group, id_shop;\n`;
   const rows = query(sqlCommand, sql).split('\n').filter((l) => l.length);
@@ -117,12 +154,27 @@ function compare(before, after) {
 const short = (v) => (v == null ? '(missing)' : v.length > 40 ? `${v.slice(0, 40)}...` : v);
 
 function main() {
-  const sqlCommand = arg('sql');
+  // The environment first, exactly like QA_BO_EMAIL and QA_BO_PASSWORD: a
+  // command holding a password has no business being in an argument list that
+  // every other user on the machine can read.
+  const fromEnv = process.env.QA_SQL && process.env.QA_SQL.trim();
+  const fromArg = arg('sql');
+  // What was typed for this run beats what a shell was left holding: a QA_SQL
+  // exported for the previous shop would otherwise read that shop again and
+  // report it unchanged, about a shop nobody touched.
+  const sqlCommand = fromArg || fromEnv;
+  if (fromArg && fromEnv && fromArg !== fromEnv) {
+    say('note: --sql was given as well as QA_SQL, and they differ. Using --sql, which was typed for this run');
+  }
   if (!sqlCommand) {
-    say("usage: fingerprint.js --sql='<command that reads SQL on stdin>' [--out=file] [--compare=file]");
-    say('       the command is never written to any file, because it carries a password');
+    say("usage: QA_SQL='<command that reads SQL on stdin>' fingerprint.js [--out=file] [--compare=file]");
+    say("       fingerprint.js --sql='<command>' [--prefix=ps_] [--out=file] [--compare=file] [--ignore=file]");
+    say('       give it as QA_SQL when it carries a password: an argument is visible to every');
+    say('       other user on this machine and ends up in the transcript');
     process.exit(64);
   }
+  say(sqlCommand === fromEnv ? 'reading the shop with the command in QA_SQL' : 'reading the shop with the command given as --sql');
+  if (sqlCommand !== fromEnv) say('  (if it carries a password, give it as QA_SQL instead: an argument is readable by everyone on this machine)');
 
   const ignores = loadIgnores(arg('ignore'));
   const { prefix, settings, ignored } = readSettings(sqlCommand, ignores);

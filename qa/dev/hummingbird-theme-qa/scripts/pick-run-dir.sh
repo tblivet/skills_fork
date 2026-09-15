@@ -93,15 +93,44 @@ done
 # shop's port, then every host folder that project mounts. A theme mounted into
 # the container is exactly the folder the evidence must not land in.
 if [ "$URL" != '-' ] && [ -n "$URL" ]; then
+  # The campaign folder gets a full placeholder check above, and the URL deserves
+  # the same one: a URL nobody filled in reads as a real address, the
+  # port falls back to 80, and whatever else on this machine answers on 80 has
+  # its folders guarded instead of the shop's.
   case $URL in
-    *'['*) : ;;  # an IPv6 literal, its brackets are not a placeholder
-    *) case $URL in *'['*|*']'*) die "the shop URL still holds a placeholder: $URL" ;; esac ;;
+    *' '*|*'<'*|*'>'*|*'$'*)
+      die "the shop URL still holds a placeholder or an unexpanded variable: $URL" ;;
+    *://undefined*|*://null*)
+      die "the shop URL points at '$URL', so a value was never set" ;;
+    *://) die "the shop URL has no host: $URL" ;;
+  esac
+  # Brackets alone cannot tell "[::1]" from "[front office URL]", but what sits
+  # between them can: an IPv6 literal is hex digits and colons and nothing else.
+  case $URL in
+    *'['*)
+      INSIDE=${URL#*[}
+      INSIDE=${INSIDE%%]*}
+      case $INSIDE in
+        '') die "the shop URL has empty brackets: $URL" ;;
+        *[!0-9A-Fa-f:]*) die "the shop URL still holds a placeholder: $URL" ;;
+      esac
+      ;;
+    *']'*) die "the shop URL still holds a placeholder: $URL" ;;
   esac
   HOSTPORT=${URL#*://}
   HOSTPORT=${HOSTPORT%%/*}
-  PORT=${HOSTPORT##*:}
+  # An IPv6 host is full of colons, so "does it have a colon" cannot find the
+  # port. Take the brackets off first: what is left after them is the port, or
+  # nothing at all and the scheme decides.
   case $HOSTPORT in
-    *:*) : ;;
+    '['*)
+      AFTER=${HOSTPORT##*]}
+      case $AFTER in
+        :*) PORT=${AFTER#:} ;;
+        *)  case $URL in https://*) PORT=443 ;; *) PORT=80 ;; esac ;;
+      esac
+      ;;
+    *:*) PORT=${HOSTPORT##*:} ;;
     *) case $URL in https://*) PORT=443 ;; *) PORT=80 ;; esac ;;
   esac
   case $PORT in

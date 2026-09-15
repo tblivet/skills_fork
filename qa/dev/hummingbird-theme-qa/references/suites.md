@@ -32,13 +32,20 @@ module.exports = {
 };
 ```
 
-Three things every check does, and a check that does not do them is not a check:
+Four things every check does, and a check that does not do them is not a check:
 
 1. **Name the checklist point it answers**, as its first argument. Coverage is recorded, never
    inferred, and a point nothing names comes out as not covered.
 2. **Say what it looked for.** A pass without that is refused by `record.js` on the spot, because
    the report is built out of these sentences and "it passed" is not one.
-3. **Leave a file behind** when a person will have to look.
+3. **Run inside a `step()`, and keep the step small.** The step is what photographs the shop, and
+   that photograph is what a green leans on when the check names no file of its own. A check
+   called outside every step has nothing behind it, and `report.js` refuses to print it as
+   settled. The picture is taken when the step ends, so a step that opens a page, checks it, then
+   navigates somewhere else leaves its first check pointing at the second page: one subject per
+   step, and `snap()` for a check that needs its own picture. A step that threw is photographed
+   after it broke, so it lends its picture to nothing.
+4. **Leave a file behind** when a person will have to look.
 
 ## Everything a suite is handed
 
@@ -62,7 +69,13 @@ Three things every check does, and a check that does not do them is not a check:
 | `fixtureCreated({what, how, id, why})` | writes down a record the suite is about to make up. `why` names the checklist point that needs it |
 | `fixtureRemoved(entry, stillThere)` | ends it, having read back whether it really went |
 | `fixtureLeft(entry, reason)` | ends it the other way, for a record that cannot be taken away |
+| `note(text)` | writes a line into the run for a reader, deciding nothing |
+| `fault(text)` | says the run itself went wrong. It lands in the report's own section and makes the run exit 2 |
 | `page`, `context` | the browser itself, for anything the helpers do not cover |
+
+A screenshot that could not be taken is never silent: `step()` and `snap()` both turn it into a
+fault, because a green whose picture went missing is exactly the claim this report promises never
+to make.
 
 `moduleRenders` exists because a module that shows nothing is two situations wearing one face:
 it has nothing configured, which the checklist explicitly asks to test, or its hook is not

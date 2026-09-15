@@ -39,11 +39,46 @@ function arg(name, fallback = null) {
 // and a way to capture, and knows nothing about checklist points.
 //   probe = { name, runnerFile, settle?, capture?, meta? }
 function startSuite({ suite, section, out, label, profile, viewport, checklist, probe, only }) {
-  fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
 
+  // A section is answered by the browser AND, for the points no browser can
+  // settle, by a command or by a person through observe.js, into this same
+  // folder. Wiping it would silently delete those answers and the report would
+  // then read the point as never looked at. So the folder stays, and the answers
+  // that did not come from this runner are carried over; the machine ones are
+  // dropped, because this run is redoing them.
+  const carried = (() => {
+    const priorFile = path.join(out, 'run.json');
+    if (!fs.existsSync(priorFile)) return [];
+    try {
+      const prior = JSON.parse(fs.readFileSync(priorFile, 'utf8'));
+      // What observe.js wrote, whoever it says spoke: `--by=machine` is a
+      // legitimate answer from a tool that is not this browser, and dropping it
+      // on the witness alone would delete it. Older files carry no marker, so
+      // an answer that belongs to no step of a run is carried too.
+      return (prior.observations || [])
+        .filter((o) => o.recordedBy === 'observe.js' || (!o.recordedBy && o.step == null));
+    } catch {
+      console.error(`  note: the run.json already in ${out} could not be read, so nothing was carried over`);
+      return [];
+    }
+  })();
+  if (carried.length) {
+    console.error(`  carrying over ${carried.length} answer(s) recorded here outside the browser`);
+  }
+
+  // Everything else in the folder belongs to the run being replaced: old
+  // screenshots, an old recording. Left there, a finding can be pointed at
+  // footage of a run that no longer exists, and every existsSync check would
+  // still pass. So the cell is swept, minus the files the carried answers name.
+  const spare = new Set(['run.json', ...carried.flatMap((o) => o.evidence || [])]);
+  for (const entry of fs.readdirSync(out)) {
+    if (spare.has(entry)) continue;
+    fs.rmSync(path.join(out, entry), { recursive: true, force: true });
+  }
+
   const rec = {
-    observations: [],
+    observations: [...carried],
     steps: [],
     settingsChanged: [],
     fixtures: [],
@@ -79,13 +114,23 @@ function startSuite({ suite, section, out, label, profile, viewport, checklist, 
     if (outcome === 'pass' && !assertion) {
       return fault(`${item} was recorded as passing without saying what was checked. That is not evidence`);
     }
+    // A machine pass is backed by the screenshot its step takes, which is taken
+    // after this returns, so it is checked by the report rather than here. A
+    // pass said by a command or by a person has no step behind it, so the file
+    // has to arrive with it.
+    if (outcome === 'pass' && by !== 'machine' && !evidence.filter(Boolean).length) {
+      return fault(`${item} was recorded as passing by ${by} with nothing to show for it. Name the file that proves it`);
+    }
     if ((outcome === 'skipped' || outcome === 'inconclusive') && !reason) {
       return fault(`${item} was recorded as ${outcome} without a reason`);
     }
-    if (outcome === 'needs-human' && !evidence.length && measurement === null) {
+    if (outcome === 'needs-human' && !evidence.filter(Boolean).length && measurement === null) {
       return fault(`${item} was left to a person with nothing for them to look at`);
     }
 
+    if (outcome === 'needs-human' && evidence.length && !evidence.filter(Boolean).length) {
+      fault(`${item} was left to a person, but the screenshot meant for them was never taken`);
+    }
     const row = {
       item, outcome, by, assertion, detail, reason,
       measurement,
@@ -113,8 +158,20 @@ function startSuite({ suite, section, out, label, profile, viewport, checklist, 
       fault(`step ${n} "${name}" stopped: ${threw}`);
     }
     if (probe.settle) { try { await probe.settle(); } catch { /* settling is best effort */ } }
+    // A screenshot that never arrived is the one failure this skill exists to
+    // make impossible: every machine pass leans on the picture of its step, so a
+    // capture that quietly returns nothing would turn the whole run green with
+    // nothing behind it. It is a fault in the run, said out loud.
     let shot = null;
-    if (probe.capture) { try { shot = await probe.capture(n, name); } catch { shot = null; } }
+    if (probe.capture) {
+      try {
+        shot = await probe.capture(n, name);
+      } catch (err) {
+        shot = null;
+        fault(`step ${n} "${name}" could not be photographed: ${String((err && err.message) || err).slice(0, 160)}`);
+      }
+      if (!shot) fault(`step ${n} "${name}" left no screenshot, so nothing it answered can be shown`);
+    }
     rec.steps.push({
       n, name, shot, ms: Date.now() - startedAt, threw,
       newProblems: rec.consoleErrors.length + rec.netErrors.length - before,

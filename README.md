@@ -55,10 +55,10 @@ skills currently available:
 
 ### Domain: `qa`
 
-| Category | Skill Folder       | Skill Name           | Description                                                                                                                                                                                        |
-| -------- | ------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dev`    | `prestashop-pr-qa` | **prestashop-pr-qa** | QA a pull request against a running environment, in a browser, on the command line or over HTTP: reproduce the bug, verify the fix, and report whether it is approved, with the recording as proof. |
-| `dev`    | `hummingbird-theme-qa` | **hummingbird-theme-qa** | Run a full end-to-end test campaign on the Hummingbird theme against a given PrestaShop version, driven by the theme's own testing checklist. Reports what was checked, what was found and what nobody looked at, and will not build a report whose evidence is missing. |
+| Category | Skill Folder             | Skill Name                   | Description                                                                                                                                                                                                                                                            |
+| -------- | ------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`    | `prestashop-pr-qa`       | **prestashop-pr-qa**         | QA a pull request against a running environment, in a browser, on the command line or over HTTP: reproduce the bug, verify the fix, and report whether it is approved, with the recording as proof.                                                                     |
+| `dev`    | `hummingbird-theme-qa`   | **hummingbird-theme-qa**     | Run a full end-to-end test campaign on the Hummingbird theme against a given PrestaShop version, driven by the theme's own testing checklist. Reports what was checked, what was found and what nobody looked at, and refuses to build a report whose greens have no evidence behind them. |
 
 ## 🗂️ Repository Structure
 

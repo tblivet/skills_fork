@@ -155,17 +155,48 @@ Built by `report.js` from `campaign.json` and every `run.json`, in this order:
 5. **Proof of test**: one line per checklist point, what was actually checked, on how many cells,
    who says so, and how many files back it up. This is the section the report exists for.
 6. **Shop settings**, and whether anything was left changed.
-7. **What was not tested**, and why.
+7. **What went wrong in the runs themselves**: the faults, which are failures of the testing and
+   not of the theme. A missing screenshot lands here, and anything a faulted run answered is worth
+   reading twice.
+8. **What was not tested**, and why.
 
-`report.js` **refuses to build** when a point is recorded as passing without saying what was
-checked, when a cited file is not on disk, when an answer or a proposed correction names a point that is
-not in this checklist, or when a setting was changed and never confirmed back. Fix what it names. `--no-verify`
-exists only to look at a report you already know is not trustworthy.
+`report.js` **refuses to build** when:
+
+* a point is recorded as passing without saying what was checked
+* a point is recorded as passing with nothing to show for it: no file named, and no screenshot of
+  the step it ran in. That is the guarantee the front page makes, so it is a refusal rather than a
+  footnote
+* a cited file is not on disk
+* an answer or a proposed correction names a point that is not in this checklist
+* a run answered a different revision of the checklist than the one in `checklist.json`
+* a setting was changed and never confirmed back
+* `--require-complete` was asked for and `gaps.json` is not empty
+
+Fix what it names. `--no-verify` exists only to look at a report you already know is not
+trustworthy.
+
+## Driving a campaign to the end
+
+Every build writes `gaps.json` next to the report: the points with no answer at all, the ones
+answered on some cells and not others, and the ones waiting for a person, each with the files to
+look at. It is there so a campaign can run itself to the end, one section at a time, without a
+person reading the whole report between turns:
+
+1. run a section, build the report
+2. read `gaps.json`
+3. write and run the suites it names
+4. repeat until nothing is owed
+5. build once more with `--require-complete`, which refuses while anything in scope is unanswered
+
+A campaign that was deliberately narrowed drops the flag and declares `scope` instead, and the
+report says on its front page that this was not the whole checklist.
 
 ## The issue files
 
 One file per finding, written for the repository that owns it, in `issues/`, plus an `index.md`
 grouped by repository saying what to open where.
+
+Write them in step 6, after the report builds, into `$RUN/issues/`.
 
 * **The whole file is the issue.** No surrounding fence, nothing to trim.
 * **Nothing in it addresses the person pasting it.** No "attach this by hand".
@@ -177,9 +208,11 @@ grouped by repository saying what to open where.
 ## Publishing
 
 `--artifact=report-artifact.html` writes a second copy of the report with its pictures carried
-inside it, because a published page cannot reach files on this machine. It has a size limit; when
-screenshots do not fit, the page says how many were left behind rather than dropping them
-quietly.
+inside it, because a published page cannot reach files on this machine. A picture carried inside a
+page is a third larger than the file on disk, and the page is capped at 16 MB once published, so
+the budget is counted on what the page will weigh. When screenshots do not fit, the page says how
+many were left behind rather than dropping them quietly. A recording is not carried at all: it is
+shown as a player in the report you open locally, and named in the published one.
 
 Publishing sends the page and every picture in it off the machine, so **look at all of them
 first**. A back office puts email addresses on order pages, and a login form carries the admin

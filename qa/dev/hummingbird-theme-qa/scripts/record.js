@@ -54,10 +54,9 @@ function startSuite({ suite, section, out, label, profile, viewport, checklist, 
       const prior = JSON.parse(fs.readFileSync(priorFile, 'utf8'));
       // What observe.js wrote, whoever it says spoke: `--by=machine` is a
       // legitimate answer from a tool that is not this browser, and dropping it
-      // on the witness alone would delete it. Older files carry no marker, so
-      // an answer that belongs to no step of a run is carried too.
-      return (prior.observations || [])
-        .filter((o) => o.recordedBy === 'observe.js' || (!o.recordedBy && o.step == null));
+      // on the witness alone would delete it. Everything else in the file was
+      // written by this runner, and this run is redoing it.
+      return (prior.observations || []).filter((o) => o.recordedBy === 'observe.js');
     } catch {
       console.error(`  note: the run.json already in ${out} could not be read, so nothing was carried over`);
       return [];
@@ -70,8 +69,11 @@ function startSuite({ suite, section, out, label, profile, viewport, checklist, 
   // Everything else in the folder belongs to the run being replaced: old
   // screenshots, an old recording. Left there, a finding can be pointed at
   // footage of a run that no longer exists, and every existsSync check would
-  // still pass. So the cell is swept, minus the files the carried answers name.
-  const spare = new Set(['run.json', ...carried.flatMap((o) => o.evidence || [])]);
+  // still pass. So the cell is swept, minus what the carried answers name.
+  // readdirSync yields top-level entries only, so evidence named with a subpath
+  // spares the folder that holds it: sweeping "shots" to keep "shots/lint.txt"
+  // would delete the very answer this block exists to protect.
+  const spare = new Set(['run.json', ...carried.flatMap((o) => (o.evidence || []).map((e) => e.split('/')[0]))]);
   for (const entry of fs.readdirSync(out)) {
     if (spare.has(entry)) continue;
     fs.rmSync(path.join(out, entry), { recursive: true, force: true });

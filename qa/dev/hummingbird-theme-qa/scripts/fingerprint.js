@@ -114,6 +114,13 @@ function readSettings(sqlCommand, ignores) {
     die('--prefix= was given with nothing after it. Write the prefix, as in --prefix=ps_, or leave the '
       + 'option out and let the database be asked');
   }
+  // The prefix goes straight into the SELECT below. Nobody gains anything by
+  // writing something else there, since whoever passes it already holds the
+  // command that reaches the database. But a typo would come back as a raw
+  // error from the client, and this file answers for its own refusals.
+  if (given && !/^[A-Za-z0-9_]+$/.test(given)) {
+    die(`--prefix=${given} is not a table prefix. A prefix is letters, digits and underscores, as in ps_`);
+  }
   if (given) say(`table prefix given on the command line: ${given}`);
   const prefix = given !== null ? given : discoverPrefix(sqlCommand);
   const sql = `SELECT name, IFNULL(id_shop_group, 0), IFNULL(id_shop, 0), IFNULL(value, '')
